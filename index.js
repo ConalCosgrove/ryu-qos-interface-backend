@@ -1,13 +1,54 @@
 const app = require('express')();
 const request = require('superagent');
 const bodyParser = require('body-parser');
+const jsnetworkx = require('jsnetworkx');
 
 app.use(bodyParser.json());
+
+const network = new jsnetworkx.DiGraph();
+const nodes = {};
+const links = {};
+const no_of_nodes = 0;
+const no_of_links = 0;
+
+
+
+request.get('http://192.168.56.3:8080/v1.0/topology/switches')
+.then((res) => {
+    const switches = [];
+    const links = [];
+    res.body.map((switc) => {
+        console.log(switc.dpid);
+        switches.push(switc.dpid);
+    });
+    network.addNodesFrom(switches);
+    request.get('http://192.168.56.3:8080/v1.0/topology/links')
+    .then((resp) => {
+        resp.body.map((link) => {
+            const linkobj = [link.src.dpid, link.dst.dpid, {'port': link.src.port_no}];
+            links.push(linkobj);
+            network.addEdgesFrom(links);
+        });
+        const path = jsnetworkx.shortestPath(network,{ source:switches[0],target:switches[4] });
+        console.log('Path', path);
+    });
+
+});
+
+app.post('/topology',(req, res) => {
+    const path = jsnetworkx.shortestPath(network, {source: req.body.source, target: req.body.destination});
+    console.log(path)
+    res.header('Access-Control-Allow-Origin','http://localhost:3000').header('Access-Control-Allow-Methods', 'POST').header('Access-Control-Allow-Headers','Content-Type').json(path);
+});
+
+app.options('/topology', (req, res) => {
+    res.header('Access-Control-Allow-Methods', 'POST, DELETE').header('Access-Control-Allow-Headers','Content-Type').header('Access-Control-Allow-Origin','http://localhost:3000').send('hi');
+});
+
 app.get('/switches', (req, res) => {
     request.get('http://192.168.56.3:8080/v1.0/topology/switches')
     .then((resp) => {
         res.header('Access-Control-Allow-Origin','http://localhost:3000').send(JSON.parse(resp.text));
-        console.log('Got',resp.text);
     });
 });
 
@@ -31,7 +72,6 @@ app.get('/qos/queue/*', (req, res) => {
 app.post('/qos/queue/*', (req, res) => {
     const switchId = req.originalUrl.split('/queue/')[1];
     console.log('Adding queue to switch', switchId);
-    console.log(req.body);
     request.post(`http://192.168.56.3:8080/qos/queue/${switchId}`)
     .send(req.body)
     .then((resp) => {
@@ -50,7 +90,6 @@ app.options('/qos/queue/*', (req, res) => {
 
 app.delete('/qos/queue/*', (req, res) => {
     const switchId = req.originalUrl.split('/queue/')[1];
-    console.log('DELETE')
     request.delete(`http://192.168.56.3:8080/qos/queue/${switchId}`)
     .then((resp) => {
         res.header('Access-Control-Allow-Origin','http://localhost:3000').header('Access-Control-Allow-Methods', 'POST, DELETE').header('Access-Control-Allow-Headers','Content-Type').send(resp);
